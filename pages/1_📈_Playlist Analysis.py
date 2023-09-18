@@ -16,8 +16,8 @@ import multiprocessing
 
 #connect to spotify API
 # Set your Spotify API credentials
-client_id = '14c84923f9ac478abf582c59dcc6f59c'
-client_secret = '8dfc8d50a3164779bdb8d74010f913b5'
+client_id = 'CLIENT_ID'
+client_secret = 'CLIENT_SECRET'
 redirect_uri = 'http://localhost:3000'
 
 # Initialize the Spotipy client with authentication
