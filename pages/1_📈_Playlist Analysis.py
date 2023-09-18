@@ -12,7 +12,8 @@ import json
 from spotipy.oauth2 import SpotifyOAuth
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
-from joblib import Parallel, delayed 
+from joblib import Parallel, delayed
+import multiprocessing
 
 #connect to spotify API
 # Set your Spotify API credentials
@@ -23,8 +24,8 @@ redirect_uri = 'http://localhost:3000'
 # Initialize the Spotipy client with authentication
 sp = spotipy.Spotify(auth_manager=SpotifyOAuth(client_id, client_secret, redirect_uri))
 
-# Process artist names and retrieve genres using Parallel
-def process_artist(artist_name):
+# Parallelization process artist names and retrieve genres
+def process_artist(artist_name, sp):
     search_results = sp.search(q=artist_name, type='artist')
     genres_info = []
 
@@ -38,6 +39,27 @@ def process_artist(artist_name):
 
     genre_string = ', '.join(genres_info) if genres_info else 'No Genre Found'
     return genre_string
+
+# Multiprocessing to process artist names and retrive genres
+def fetch_artist_genres(artist_name):
+    search_results = sp.search(q=artist_name, type='artist')
+    genres_info = []
+
+    if 'artists' in search_results and 'items' in search_results['artists']:
+        artists = search_results['artists']['items']
+
+        for artist in artists:
+            if artist['name'] == artist_name:
+                genres_info = artist.get('genres', [])
+                break
+
+    genre = ', '.join(genres_info) if genres_info else 'No Genre Found'
+    return genre
+
+# Read csv file
+@st.cache_data
+def read_csv():
+    return pd.read_csv('spotify_songs.csv')
 
 # Change spotify playlist dictionary of links to URIs
 def get_uri(playlist):
@@ -108,8 +130,31 @@ def get_df(uri, playlist_size):
 
     st.toast('Generating Playlist Details', icon='⚙️')
 
+    # for artist_name in artist_names:
+    #     search_results = sp.search(q=artist_name, type='artist')
+    #     genres_info = []
+
+    #     if 'artists' in search_results and 'items' in search_results['artists']:
+    #         artists = search_results['artists']['items']
+
+    #         for artist in artists:
+    #             if artist['name'] == artist_name:
+    #                 genres_info = artist.get('genres', [])
+    #                 break
+
+    #     genre = ', '.join(genres_info) if genres_info else 'No Genre Found'
+    #     genres.append(genre)
+      
     # Fill genre for each song using Parallelization
-    genres = Parallel(n_jobs=-1)(delayed(process_artist)(artist_name) for artist_name in artist_names)
+    genres = Parallel(n_jobs=1)(delayed(process_artist)(artist_name, sp) for artist_name in artist_names)
+
+    # multiprocessing
+    # if __name__ == "__main__":
+    #     # Create a multiprocessing pool
+    #     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    #         # Use the pool.map method to parallelize the execution
+    #         genres = pool.map(fetch_artist_genres, [(artist_name) for artist_name in artist_names])
+
 
     # Add the collected data to the DataFrame
     playlist['Year'] = release_years
@@ -166,7 +211,7 @@ def display_df(playlist):
 
 # Get song recommendations based on user's playlist
 def get_recommendations(playlist, top_3_genres):
-    feat_vec = pd.read_csv('spotify_songs.csv')
+    feat_vec = read_csv()
 
     st.toast('Computing Song Recommendations', icon='🎵')
 
@@ -255,7 +300,29 @@ def get_recommendations(playlist, top_3_genres):
     st.toast('Displaying Song Recommendations', icon='✨')
 
     # Fill genre for each song using Parallelization
-    genres = Parallel(n_jobs=-1)(delayed(process_artist)(artist_name) for artist_name in artist_names)
+    genres = Parallel(n_jobs=1)(delayed(process_artist)(artist_name, sp) for artist_name in artist_names)
+
+    # multiprocessing
+    # if __name__ == "__main__":
+    #     # Create a multiprocessing pool
+    #     with multiprocessing.Pool(processes=multiprocessing.cpu_count()) as pool:
+    #         # Use the pool.map method to parallelize the execution
+    #         genres = pool.map(fetch_artist_genres, [(artist_name) for artist_name in artist_names])
+
+    # for artist_name in artist_names:
+    #     search_results = sp.search(q=artist_name, type='artist')
+    #     genres_info = []
+
+    #     if 'artists' in search_results and 'items' in search_results['artists']:
+    #         artists = search_results['artists']['items']
+
+    #         for artist in artists:
+    #             if artist['name'] == artist_name:
+    #                 genres_info = artist.get('genres', [])
+    #                 break
+
+    #     genre = ', '.join(genres_info) if genres_info else 'No Genre Found'
+    #     genres.append(genre)
    
     # Add the collected data to the DataFrame
     top_similarities['genre'] = genres
@@ -316,7 +383,12 @@ with st.sidebar.form(key='Form1'):
     submitted_playlist = st.form_submit_button(label = 'Find Playlist 🔎')
 
 if playlist == '':
-    st.warning('Please input a valid playlist link to analyze. The playlist is public!')
+    st.warning('Please input a valid playlist link to analyze.')
+    st.write('To make sure the program can read your playlist, please input the playlist link in this format:')
+    st.text('https://open.spotify.com/playlist/...')
+    st.write('Playlist links in this format can be found through Spotify web and desktop app, NOT the mobile app')
+    st.write('Provided is a sample link to run a playlist analysis: https://open.spotify.com/playlist/37i9dQZF1DX5Q5wA1hY6bS?si=9d42312b259e4c60')
+
 
 else:
     playlist = get_uri(playlist)
