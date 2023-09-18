@@ -2,7 +2,7 @@
 FROM python:3.8
 # EXPOSE 8501
 EXPOSE 8080
-WORKDIR /Users/joshuachang/Development/SpotifyRecommender
+WORKDIR /workdir/
 COPY . .
 # COPY requirements.txt ./requirements.txt
 RUN pip install -r requirements.txt
