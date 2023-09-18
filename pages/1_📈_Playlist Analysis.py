@@ -1,19 +1,18 @@
-# Allows user to input link to playlist and analytics regarding playlist will be given along with a recommendation of songs
-
-# TODO
-# - show progress bar for calculating results... in sidebar
+# Allows a maximum of 3 playlist and drawing analytics from each song in all playlists, songs will be recommended
 
 import streamlit as st
 import pandas as pd
-import plotly.graph_objs as go
-import plotly.offline as pyo
 import spotipy
 import json
+import plotly.graph_objs as go
 from spotipy.oauth2 import SpotifyOAuth
 from sklearn.preprocessing import MinMaxScaler
 from sklearn.metrics.pairwise import cosine_similarity
-from joblib import Parallel, delayed
+from joblib import Parallel, delayed 
 import multiprocessing
+
+# TODO
+# if time permits, create weightings for certain songs if they are combined
 
 #connect to spotify API
 # Set your Spotify API credentials
@@ -62,26 +61,17 @@ def read_csv():
     return pd.read_csv('spotify_songs.csv')
 
 # Change spotify playlist dictionary of links to URIs
-def get_uri(playlist):
-    playlist = playlist[34:56]
-   
-    try:
-        playlist_tracks = sp.playlist_tracks(playlist)
-    
-    except spotipy.SpotifyException as e:
-        if "Unsupported URL / URI" in str(e):
-            st.error('This playlist link is invalid', icon='🚨')
-    
-    return playlist
+def get_uri(playlists):
+    for key in playlists:
+        playlists[key] = playlists[key][34:56]
+    return playlists
 
 # Using playlist URI, get df of spotify songs in playlist
-def get_df(uri, playlist_size):
-    playlist_tracks = sp.playlist_tracks(uri, limit=playlist_size)
+def get_df(uri):
+    playlist_tracks = sp.playlist_tracks(uri, limit=50)
 
     # Create lists to hold track titles and artist names
     titles, artists, uri = [], [], []
-
-    st.toast('Gathering Playlist Data', icon='🔎')
 
     # Iterate through the tracks and collect data
     for item in playlist_tracks['items']:
@@ -99,7 +89,7 @@ def get_df(uri, playlist_size):
     new_feat = ['danceability', 'energy', 'loudness', 'mode', 'speechiness', 'acousticness', 'instrumentalness', 'liveness', 'valence', 'tempo']
     for item in new_feat:
         playlist[item] = 0
-
+        
     # fill null with feature values 
     for i in range(len(playlist)):
         track_uri = playlist.iloc[i].uri
@@ -111,7 +101,10 @@ def get_df(uri, playlist_size):
         for feature in new_feat:
             playlist.loc[i, feature] = dictionary[feature]
     
-    # Get Genre, Popularity, and Year
+    return playlist     
+
+# Show Track Title, Artist, Genre, Year, Popularity
+def display_df(playlist):
     # Get track URIs
     track_uris = playlist['uri'].tolist()
 
@@ -128,23 +121,6 @@ def get_df(uri, playlist_size):
     # Create an empty list to store genres
     genres = []
 
-    st.toast('Generating Playlist Details', icon='⚙️')
-
-    # for artist_name in artist_names:
-    #     search_results = sp.search(q=artist_name, type='artist')
-    #     genres_info = []
-
-    #     if 'artists' in search_results and 'items' in search_results['artists']:
-    #         artists = search_results['artists']['items']
-
-    #         for artist in artists:
-    #             if artist['name'] == artist_name:
-    #                 genres_info = artist.get('genres', [])
-    #                 break
-
-    #     genre = ', '.join(genres_info) if genres_info else 'No Genre Found'
-    #     genres.append(genre)
-      
     # Fill genre for each song using Parallelization
     genres = Parallel(n_jobs=1)(delayed(process_artist)(artist_name, sp) for artist_name in artist_names)
 
@@ -161,9 +137,62 @@ def get_df(uri, playlist_size):
     playlist['Popularity'] = popularity_list
     playlist['Genre'] = genres
 
-    return playlist     
+    # Change to type of Year column from int to string
+    playlist['Year'] = playlist['Year'].astype(str)
 
-#Show genre breakdown
+    # Select and return the desired columns
+    display_features = ['Title', 'Artist', 'Genre', 'Year', 'Popularity']
+    result_df = playlist[display_features]
+
+    return result_df
+
+def show_user_df(playlist):
+    # Select and return the desired columns
+    display_features = ['Title', 'Artist', 'Genre', 'Year', 'Popularity']
+    result_df = playlist[display_features]
+    st.dataframe(result_df, hide_index=True)
+
+# Combine playlists, use overloading to take in 2 or 3 parameters 
+def combine_playlists(*args, **kwargs):
+    if len(args) == 2:
+        combined = pd.concat([args[0], args[1]], ignore_index=True)
+    if len(args) == 3:
+        combined = pd.concat([args[0], args[1], args[2]], ignore_index=True)
+    
+    duplicates = combined['uri'].duplicated()
+    duplicate_rows = combined[duplicates]
+    combined = combined.drop_duplicates()
+    st.write('## Middleground Playlist')
+    st.write('A combination of all songs into one playlist.')
+    show_user_df(combined)
+    if combined.shape[0] >= 1:
+        st.write('## Tracks in Common')
+        show_user_df(duplicate_rows)
+    return combined
+
+# Show metrics of 
+def get_metrics(df):
+    st.write('## Middleground Playlist Feature Metrics')
+    
+    averages = df.mean()
+
+    energy = averages['energy']
+    danceability = averages['danceability']
+    valence = averages['valence']
+
+    col1, col2, col3 = st.columns(3)
+    col1.metric('Energy', int(energy*100))
+    col2.metric('Danceability', int(danceability*100))
+    col3.metric('Valence', int(valence*100))
+
+    # Dropdown for info about features
+    with st.expander("Feature Description"):
+        st.write('Energy - represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy. A value of 0 is the least energetic and 100 is most energetic')
+        st.write('Danceability - describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall. A value of 0 is least danceable and 100 is most danceable')
+        st.write('Valence - positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry). A value of 0 is the lowest valence and 100 has the highest valence')
+        st.write('Additional Audio Feature Descriptions: [Song Audio Features](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)')
+
+#Show distribution of genres in playlist
 def show_genre_breakdown(playlist):
     genre_count = {}
     genres = ['acoustic', 'alt-rock', 'ambient', 'blues', 'chill', 'classical', 'club', 'country', 'dance', 'dancehall', 'disco', 'dub', 'edm', 'electro', 'emo', 'folk', 'funk', 'gospel', 'goth', 'groove', 'guitar', 'hip-hop', 'house', 'indie', 'jazz', 'k-pop', 'metal', 'opera', 'party', 'piano', 'pop', 'punk', 'rock', 'rock-n-roll', 'romance', 'sad', 'salsa', 'samba', 'singer-songwriter', 'sleep', 'songwriter', 'soul', 'spanish', 'tango', 'techno']
@@ -172,8 +201,8 @@ def show_genre_breakdown(playlist):
         playlist['genre_'+genre] = playlist['Genre'].str.contains(genre).astype(int)
         if playlist['genre_'+genre].sum() > 0:
             genre_count[genre] = playlist['genre_'+genre].sum()
-    
-    st.write('### Genre Distribution')
+
+    st.write('## Genre Distribution')
     # Create a pie chart using Plotly
     labels = list(genre_count.keys())
     values = list(genre_count.values())
@@ -184,38 +213,14 @@ def show_genre_breakdown(playlist):
     #get top 3 genres for recommendation 
     top_3 = sorted(genre_count, key=genre_count.get, reverse=True)[:3]
     return top_3
-  
-# Show most popular songs in playlist
-def show_most_popular_songs(playlist):
-    st.write('### Popular Songs')
-    popularity_playlist = playlist.sort_values(by='Popularity', ascending=False)
-    columns_shown = ['Title', 'Artist', 'Popularity']
 
-    if len(popularity_playlist) > 5:
-        top_five = popularity_playlist.head(5)
-        top_five = top_five[columns_shown].reset_index(drop=True)
-        st.dataframe(top_five)
-    else:
-        st.write("There are not enough songs in this playlist.")
-
-# Show Track Title, Artist, Genre, Year, Popularity
-def display_df(playlist):
-    # Change to type of Year column from int to string
-    playlist['Year'] = playlist['Year'].astype(str)
-
-    # Select and return the desired columns
-    display_features = ['Title', 'Artist', 'Genre', 'Year', 'Popularity']
-    result_df = playlist[display_features]
-
-    st.dataframe(result_df)
-
-# Get song recommendations based on user's playlist
+# Show metrics of 
 def get_recommendations(playlist, top_3_genres):
     feat_vec = read_csv()
 
     st.toast('Computing Song Recommendations', icon='🎵')
 
-    # need to have the same shape and order of columns in order to run cosine similarity
+    # need to have the same shape and order of columns in order to run cosinesimilarity
     # make buckets based on year range to match feature vector
     playlist['year_2000-2004'] = playlist['Year'].astype(int).apply(lambda year: 1 if year>=2000 and year<2005 else 0)
     playlist['year_2005-2009'] = playlist['Year'].astype(int).apply(lambda year: 1 if year>=2005 and year<2010 else 0)
@@ -282,6 +287,7 @@ def get_recommendations(playlist, top_3_genres):
     # get track name, artist, and 30s audio clip url
     for i in range(len(top_similarities)):
         track_info = sp.track(top_similarities.iloc[i,55])
+    
         track_name = track_info['name']
         artist_name = track_info['artists'][0]['name']
         preview_url = track_info['preview_url']
@@ -309,21 +315,7 @@ def get_recommendations(playlist, top_3_genres):
     #         # Use the pool.map method to parallelize the execution
     #         genres = pool.map(fetch_artist_genres, [(artist_name) for artist_name in artist_names])
 
-    # for artist_name in artist_names:
-    #     search_results = sp.search(q=artist_name, type='artist')
-    #     genres_info = []
 
-    #     if 'artists' in search_results and 'items' in search_results['artists']:
-    #         artists = search_results['artists']['items']
-
-    #         for artist in artists:
-    #             if artist['name'] == artist_name:
-    #                 genres_info = artist.get('genres', [])
-    #                 break
-
-    #     genre = ', '.join(genres_info) if genres_info else 'No Genre Found'
-    #     genres.append(genre)
-   
     # Add the collected data to the DataFrame
     top_similarities['genre'] = genres
 
@@ -365,78 +357,93 @@ def format_recommendation_results(playlist_recs):
         ),
 
     }
+    st.write('## Song Recommendations')
     st.data_editor(playlist_recs, column_config=column_configuration, hide_index=True, num_rows='fixed', disabled=True)
 
-st.set_page_config(page_title="Playlist Analysis", page_icon="📈")
+st.set_page_config(page_title="Recommendations", page_icon="✨")
 
-st.markdown("# Playlist Analysis 📈")
-st.write("Share your playlist link to unveil a comprehensive analysis of your playlist's audio features, genre distribution, and most popular songs. Leveraging the audio attributes and genres of the songs in your playlist, mathematical similarity measures are used to recommend 30 new tracks to expand your musical horizons. Plus, you'll enjoy a 30-second audio preview of each recommended song!")
+st.markdown("# Musical Middle Ground ✨")
+st.write("Discover shared songs, explore playlist feature metrics, and observe genre distributions that address everyone's preferences. By using track feature metrics from songs across all the playlists, we create a curated list of songs that seamlessly blend the diverse tastes of multiple playlists!")
 
-st.sidebar.header("Playlist Parameters")
+playlist_names = []
+playlist_links = []
 
-playlist = ''
+st.sidebar.header("Playlist Import Parameters")
+num_playlists = st.sidebar.number_input('Number of Playlists', min_value=2, max_value=3, value=2, step=1)
 
 with st.sidebar.form(key='Form1'):
     # User inputs name and link to playlists
-    playlist = st.text_input('Enter Playlist Link') 
-    playlist_size = st.slider('Size of playlist', 15, 100, 50, 5)
-    submitted_playlist = st.form_submit_button(label = 'Find Playlist 🔎')
+    for i in range(num_playlists):
+        playlist_names.append(st.text_input('Enter Name of Playlist '+str(i+1), key=i+3)) 
+        playlist_links.append(st.text_input('Enter Link of Playlist '+str(i+1), key=i)) 
 
-if playlist == '':
-    st.warning('Please input a valid playlist link to analyze.')
+    #convert playlist names and links to dictionary
+    playlists = {key:value for key, value in zip(playlist_names, playlist_links)}
+    playlists = get_uri(playlists)
+    
+    submitted_playlist = st.form_submit_button(label = 'Find Playlists 🔎')
+
+if submitted_playlist:
+    playlist_keys = list(playlists.keys())
+    st.toast('Searching Spotify for Playlists', icon='🔎')
+
+    st.write('## Individual Playlists')
+    with st.expander('See information for each song in playlist'):
+        if len(playlists) == 2:
+            tab1, tab2 = st.tabs(list(playlists.keys()))
+            # Playlist 1 Dataframe
+            playlist_1 = get_df(playlists[playlist_keys[0]])
+            display_playlist_1 = display_df(playlist_1)
+            tab1.dataframe(display_playlist_1, hide_index=True)
+            st.toast('Generated Data from '+playlist_keys[0]+' Playlist', icon='🎵')
+            # Playlist 2 Dataframe
+            playlist_2 = get_df(playlists[playlist_keys[1]])
+            display_playlist_2 = display_df(playlist_2)
+            tab2.dataframe(display_playlist_2, hide_index=True)
+            st.toast('Generated Data from '+playlist_keys[1]+' Playlist', icon='🎵')
+        
+        else:
+            tab1, tab2, tab3 = st.tabs(list(playlists.keys()))
+            # Playlist 1 Dataframe
+            playlist_1 = get_df(playlists[playlist_keys[0]])
+            display_playlist_1 = display_df(playlist_1)
+            tab1.dataframe(display_playlist_1)
+            st.toast('Generated Data from '+playlist_keys[0]+' Playlist', icon='🎵')
+            # Playlist 2 Dataframe
+            playlist_2 = get_df(playlists[playlist_keys[1]])
+            display_playlist_2 = display_df(playlist_2)
+            tab2.dataframe(display_playlist_2)
+            st.toast('Generated Data from '+playlist_keys[1]+' Playlist', icon='🎵')
+            #Display Playlist Dataframe
+            playlist_3 = get_df(playlists[playlist_keys[2]])
+            display_playlist_3 = display_df(playlist_3)
+            tab3.dataframe(display_playlist_3)
+            st.toast('Generated Data from '+playlist_keys[2]+' Playlist', icon='🎵')
+
+    if len(playlists) == 2:
+        combined = combine_playlists(playlist_1, playlist_2)
+    else:
+        combined = combine_playlists(playlist_1, playlist_2, playlist_3)
+
+    get_metrics(combined)
+    st.toast('Generating Genre Breakdown', icon='🥧')
+    top_3_genres = show_genre_breakdown(combined)
+    format_recommendation_results(get_recommendations(combined, top_3_genres))
+
+else:
+    st.warning('Please input playlist paramters')
     st.write('To make sure the program can read your playlist, please input the playlist link in this format:')
     st.text('https://open.spotify.com/playlist/...')
     st.write('Playlist links in this format can be found through Spotify web and desktop app, NOT the mobile app')
-    st.write('Provided is a sample link to run a playlist analysis: https://open.spotify.com/playlist/37i9dQZF1DX5Q5wA1hY6bS?si=9d42312b259e4c60')
+    st.write('Provided is a sample link of a playlist: https://open.spotify.com/playlist/37i9dQZF1DX5Q5wA1hY6bS?si=9d42312b259e4c60')
 
-
-else:
-    playlist = get_uri(playlist)
-
-    # Print playlist name
-    playlist_info = sp.playlist(playlist)
-    playlist_name = playlist_info['name']
-    st.write('# '+playlist_info['name']+' Playlist Analytics')
-
-    playlist = get_df(playlist, playlist_size)
-
-    # Get values of Energy, Danceability, and Valence
-    st.write('### Feature Playlist Ratings')
-    playlist_avg = playlist.mean()
-    col1, col2, col3 = st.columns(3)
-    col1.metric("Energy", int(playlist_avg['energy']*100))
-    col2.metric("Danceability", int(playlist_avg['danceability']*100))
-    col3.metric("Valence", int(playlist_avg['valence']*100))
-    # Dropdown for info about features
-    with st.expander("Feature Description"):
-        st.write('Energy - represents a perceptual measure of intensity and activity. Typically, energetic tracks feel fast, loud, and noisy. For example, death metal has high energy, while a Bach prelude scores low on the scale. Perceptual features contributing to this attribute include dynamic range, perceived loudness, timbre, onset rate, and general entropy. A value of 0 is the least energetic and 100 is most energetic')
-        st.write('Danceability - describes how suitable a track is for dancing based on a combination of musical elements including tempo, rhythm stability, beat strength, and overall. A value of 0 is least danceable and 100 is most danceable')
-        st.write('Valence - positiveness conveyed by a track. Tracks with high valence sound more positive (e.g. happy, cheerful, euphoric), while tracks with low valence sound more negative (e.g. sad, depressed, angry). A value of 0 is the lowest valence and 100 has the highest valence')
-        st.write('Additional Audio Feature Descriptions: [Song Audio Features](https://developer.spotify.com/documentation/web-api/reference/get-audio-features)')
-    #st.divider()
-
-    # Show breakdown of genres 
-    top_3_genres = show_genre_breakdown(playlist)
-
-    # Show top 5 most popular songs
-    show_most_popular_songs(playlist)
-    #st.divider()
-
-    # Show dataframe
-    with st.expander("Checkout Playlist Songs"):
-        display_df(playlist)
-
-    # Song Recommendations
-    st.write('### Song Recommendations')
-    #st.dataframe(playlist)
-    playlist = get_recommendations(playlist, top_3_genres)
-
-    format_recommendation_results(playlist)
 
 # tests
 # Serendipity: https://open.spotify.com/playlist/51mwSPAk0bqVFM4Lz0IXZ1?si=f6f564a6cc564c89
 # Wild & Free: https://open.spotify.com/playlist/37i9dQZF1DX5Q5wA1hY6bS?si=9d42312b259e4c60
 # Soft Pop Hits: https://open.spotify.com/playlist/37i9dQZF1DWTwnEm1IYyoj?si=93c3dd7ae383404b 
+
+
 
 
 
