@@ -2,8 +2,6 @@
 
 > _A Spotify song recommendation system conducting analysis on a user’s playlist and delivering personalized recommendations._
 
-## Use the [Spotify Song Recommender System](https://song-recommender-container-guabsorn5a-uc.a.run.app)
-
 ## Read the detailed [Medium Article](https://medium.com/@joshjc038/data-driven-music-exploration-building-a-spotify-song-recommender-5780cabfe194) that describes my process of completing this project
 
 https://github.com/JoshChang8/Spotify-Song-Recommender/assets/82460964/cb4a7230-0da7-4f16-a0e4-bdbbe011c307
